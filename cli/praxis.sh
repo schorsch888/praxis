@@ -284,9 +284,9 @@ _link_skill() {
   local skill="$2"
   local target_dir="$3"
   local agent_name="$4"
-  mkdir -p "$target_dir"
-  cp "$skill_file" "${target_dir}/${skill}.md"
-  info "Linked to ${agent_name}: ${target_dir}/${skill}.md"
+  mkdir -p "${target_dir}/${skill}"
+  cp "$skill_file" "${target_dir}/${skill}/SKILL.md"
+  info "Linked to ${agent_name}: ${target_dir}/${skill}/SKILL.md"
 }
 
 # Auto-detect and link to all detected AI tool directories (project scope)

@@ -13,6 +13,15 @@ Thumbs.db
 .praxis.lock
 .praxis/
 
+# Installed skill copies (managed by praxis CLI, not source)
+.claude/skills/
+.cursor/skills/
+.github/copilot-skills/
+.windsurf/skills/
+.cline/skills/
+.gemini/skills/
+.agents/skills/
+
 # Backups
 *.bak
 
