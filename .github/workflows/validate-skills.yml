@@ -1,0 +1,235 @@
+name: Validate Skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skills/**'
+      - 'registry.yaml'
+      - 'SKILL_SPEC.md'
+      - 'cli/**'
+  pull_request:
+    paths:
+      - 'skills/**'
+      - 'registry.yaml'
+      - 'SKILL_SPEC.md'
+      - 'cli/**'
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.7
+      - name: Run ShellCheck on CLI
+        run: shellcheck cli/praxis.sh
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.7
+
+      - name: Validate YAML frontmatter in all SKILL.md files
+        run: |
+          exit_code=0
+          for skill_file in skills/*/SKILL.md; do
+            [ -f "$skill_file" ] || continue
+            dir_name="$(basename "$(dirname "$skill_file")")"
+
+            # Skip template
+            if [ "$dir_name" = "_template" ]; then
+              echo "Skipping template: $skill_file"
+              continue
+            fi
+
+            # Validate directory name before use
+            if ! printf '%s' "$dir_name" | grep -qE '^[a-z][a-z0-9-]{1,49}$'; then
+              echo "::error file=$skill_file::Invalid directory name '$dir_name'"
+              exit_code=1
+              continue
+            fi
+            if printf '%s' "$dir_name" | grep -qF -- '--'; then
+              echo "::error file=$skill_file::Directory name '$dir_name' contains consecutive hyphens"
+              exit_code=1
+              continue
+            fi
+
+            echo "Validating: $skill_file"
+
+            # Check frontmatter exists (starts with ---)
+            if ! head -n 1 "$skill_file" | grep -q '^---$'; then
+              echo "::error file=$skill_file::Missing YAML frontmatter (must start with ---)"
+              exit_code=1
+              continue
+            fi
+
+            # Extract frontmatter using awk (first block only)
+            frontmatter="$(awk 'NR==1 && /^---$/ { next } /^---$/ { exit } { print }' "$skill_file")"
+
+            # Check required fields
+            for field in name version description; do
+              if ! echo "$frontmatter" | grep -q "^${field}:"; then
+                # Sanitize for annotation
+                safe_field="$(printf '%s' "$field" | tr -d '\n\r')"
+                echo "::error file=$skill_file::Missing required frontmatter field: $safe_field"
+                exit_code=1
+              fi
+            done
+
+            # Check name matches directory
+            fm_name="$(echo "$frontmatter" | grep '^name:' | sed 's/^name:[[:space:]]*//')"
+            safe_fm_name="$(printf '%s' "$fm_name" | tr -d '\n\r')"
+            if [ "$safe_fm_name" != "$dir_name" ]; then
+              echo "::error file=$skill_file::Frontmatter name '$safe_fm_name' does not match directory name '$dir_name'"
+              exit_code=1
+            fi
+
+            # Check version is strict semver
+            fm_version="$(echo "$frontmatter" | grep '^version:' | sed 's/^version:[[:space:]]*//')"
+            safe_fm_version="$(printf '%s' "$fm_version" | tr -d '\n\r')"
+            if ! echo "$safe_fm_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error file=$skill_file::Version '$safe_fm_version' is not valid semver (expected MAJOR.MINOR.PATCH)"
+              exit_code=1
+            fi
+          done
+          exit $exit_code
+
+      - name: Check required sections in all SKILL.md files
+        run: |
+          exit_code=0
+          for skill_file in skills/*/SKILL.md; do
+            [ -f "$skill_file" ] || continue
+            dir_name="$(basename "$(dirname "$skill_file")")"
+
+            # Skip template (uses placeholders)
+            if [ "$dir_name" = "_template" ]; then
+              continue
+            fi
+
+            echo "Checking sections: $skill_file"
+
+            # Check for H1 title
+            if ! grep -q '^# ' "$skill_file"; then
+              echo "::error file=$skill_file::Missing H1 title (# Title)"
+              exit_code=1
+            fi
+
+            # Check for Core Philosophy
+            if ! grep -q '^## Core Philosophy' "$skill_file"; then
+              echo "::error file=$skill_file::Missing required section: ## Core Philosophy"
+              exit_code=1
+            fi
+
+            # Check for a process section (## The ...)
+            if ! grep -qE '^## The ' "$skill_file"; then
+              echo "::error file=$skill_file::Missing required section: ## The {Process}"
+              exit_code=1
+            fi
+
+            # Check for Safety Guards
+            if ! grep -q '^## Safety Guards' "$skill_file"; then
+              echo "::error file=$skill_file::Missing required section: ## Safety Guards"
+              exit_code=1
+            fi
+
+            # Check for Quick Reference
+            if ! grep -q '^## Quick Reference' "$skill_file"; then
+              echo "::error file=$skill_file::Missing required section: ## Quick Reference"
+              exit_code=1
+            fi
+
+            # Validate section ordering (monotonic line numbers)
+            prev_line=0
+            for pattern in '^# ' '^## Core Philosophy' '^## The ' '^## Safety Guards' '^## Quick Reference'; do
+              line_num="$(grep -n "$pattern" "$skill_file" | head -n 1 | cut -d: -f1)"
+              if [ -n "$line_num" ] && [ "$prev_line" -gt 0 ] && [ "$line_num" -le "$prev_line" ]; then
+                echo "::error file=$skill_file::Required sections are out of order (line $line_num should come after line $prev_line)"
+                exit_code=1
+              fi
+              [ -n "$line_num" ] && prev_line="$line_num"
+            done
+
+            # Check for at least one bold-numbered guard (scoped to Safety Guards section)
+            guard_count="$(sed -n '/^## Safety Guards/,/^## /p' "$skill_file" | grep -cE '^[0-9]+\. \*\*' 2>/dev/null || echo 0)"
+            if [ "$guard_count" -eq 0 ]; then
+              echo "::error file=$skill_file::No bold-numbered safety guards found in Safety Guards section"
+              exit_code=1
+            fi
+
+            # Check no Mermaid diagrams
+            if grep -q '```mermaid' "$skill_file"; then
+              echo "::error file=$skill_file::Contains Mermaid diagram (use ASCII art)"
+              exit_code=1
+            fi
+
+            # Check code blocks have language identifiers
+            bare_opens="$(awk '
+              BEGIN { bare = 0; in_block = 0 }
+              /^```[a-zA-Z]/ { in_block = 1; next }
+              /^```$/ {
+                if (in_block) { in_block = 0 }
+                else { bare++; in_block = 1 }
+                next
+              }
+              END { print bare }
+            ' "$skill_file")"
+            if [ "$bare_opens" -gt 0 ]; then
+              echo "::warning file=$skill_file::$bare_opens code block(s) without language identifier"
+            fi
+
+            # Check file size (warn if > 100KB)
+            file_size="$(wc -c < "$skill_file")"
+            if [ "$file_size" -gt 102400 ]; then
+              echo "::warning file=$skill_file::File is ${file_size} bytes (>100KB may consume excessive context)"
+            fi
+          done
+          exit $exit_code
+
+      - name: Verify registry matches skills directory
+        run: |
+          exit_code=0
+
+          # Get skills from directory (exclude _template)
+          dir_skills="$(ls -d skills/*/SKILL.md 2>/dev/null | sed 's|skills/\(.*\)/SKILL.md|\1|' | grep -v '^_template$' | sort)"
+
+          # Get skills from registry
+          reg_skills="$(grep -E '^  [a-z][a-z0-9-]+:$' registry.yaml | sed 's/^  \(.*\):$/\1/' | sort)"
+
+          # Check all directory skills are in registry
+          for skill in $dir_skills; do
+            if ! echo "$reg_skills" | grep -q "^${skill}$"; then
+              echo "::error::Skill '$skill' exists in skills/ but not in registry.yaml"
+              exit_code=1
+            fi
+          done
+
+          # Check all registry skills have directories
+          for skill in $reg_skills; do
+            if ! echo "$dir_skills" | grep -q "^${skill}$"; then
+              echo "::error::Skill '$skill' listed in registry.yaml but not found in skills/"
+              exit_code=1
+            fi
+          done
+
+          # Verify SHA-256 checksums where available
+          for skill in $dir_skills; do
+            skill_file="skills/${skill}/SKILL.md"
+            # Extract expected sha from registry using awk -v (no injection)
+            expected_sha="$(awk -v s="$skill" '$0 == "  " s ":" {found=1; next} found && /^  [a-z]/{exit} found && /sha256:/{print}' registry.yaml | sed 's/.*sha256:[[:space:]]*//')"
+            if [ -n "$expected_sha" ]; then
+              actual_sha="$(sha256sum "$skill_file" | cut -d' ' -f1)"
+              if [ "$actual_sha" != "$expected_sha" ]; then
+                echo "::error::SHA-256 mismatch for '$skill': registry says $expected_sha, file is $actual_sha"
+                exit_code=1
+              else
+                echo "SHA-256 verified for $skill"
+              fi
+            fi
+          done
+
+          if [ $exit_code -eq 0 ]; then
+            echo "Registry and skills directory are in sync."
+          fi
+          exit $exit_code
