@@ -184,6 +184,27 @@ jobs:
             if [ "$file_size" -gt 102400 ]; then
               echo "::warning file=$skill_file::File is ${file_size} bytes (>100KB may consume excessive context)"
             fi
+
+            # Check documented subcommands are present in frontmatter manual commands
+            frontmatter="$(awk 'NR==1 && /^---$/ { next } /^---$/ { exit } { print }' "$skill_file")"
+            manual_cmds="$(printf '%s\n' "$frontmatter" | sed -n 's/^[[:space:]]*- command:[[:space:]]*"\([^"]*\)".*/\1/p' | sort -u)"
+            doc_cmds="$(sed -n 's/^### `\([^`]*\)`.*/\1/p' "$skill_file" | grep -E '^/' | sort -u || true)"
+
+            if [ -n "$doc_cmds" ]; then
+              missing=""
+              while IFS= read -r cmd; do
+                [ -z "$cmd" ] && continue
+                if ! printf '%s\n' "$manual_cmds" | grep -Fxq "$cmd"; then
+                  missing="${missing}${cmd}\n"
+                fi
+              done <<< "$doc_cmds"
+              if [ -n "$missing" ]; then
+                echo "::error file=$skill_file::Documented subcommands missing from frontmatter manual command list"
+                echo "Missing commands:"
+                printf '%b' "$missing" | sed 's/^/  - /'
+                exit_code=1
+              fi
+            fi
           done
           exit $exit_code
 

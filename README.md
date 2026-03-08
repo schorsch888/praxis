@@ -43,11 +43,14 @@ praxis install self-improve
 
 Or manually: copy any [`SKILL.md`](skills/) file into your project's AI configuration directory.
 
+`praxis` CLI is for skill distribution and validation. Skill workflows (for example `/self-improve`) run inside your AI agent, not inside this CLI.
+
 ## Available Skills
 
 | Skill | Version | Description |
 |-------|---------|-------------|
-| [self-improve](skills/self-improve/) | 1.0.0 | Teaches AI agents to learn from practice — extracting patterns, lessons, and coding standards from bugs fixed, reviews completed, and features shipped |
+| [design-doc-elite-review](skills/design-doc-elite-review/) | 0.1.0 | Runs multi-round, cross-functional design document reviews with explicit support and opposition analysis, then issues a decision using enterprise and big-tech production standards |
+| [self-improve](skills/self-improve/) | 1.1.0 | Teaches AI agents to learn from practice — extracting patterns, lessons, and coding standards from bugs fixed, reviews completed, and features shipped |
 
 ## How It Works
 
@@ -91,6 +94,8 @@ curl -fsSL https://raw.githubusercontent.com/praxis-skills/praxis/main/cli/praxi
 chmod +x praxis.sh
 ./praxis.sh install self-improve
 ```
+
+The CLI installs and validates skills only. Execution happens in your AI tool after the skill is loaded.
 
 ### Option B: Global install
 

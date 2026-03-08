@@ -54,6 +54,10 @@ ${BOLD}praxis${RESET} v${VERSION} — skill manager for AI coding agents
 ${BOLD}USAGE${RESET}
   praxis <command> [options] [arguments]
 
+${BOLD}NOTE${RESET}
+  This CLI installs, updates, and validates skills.
+  Skill workflows (for example /self-improve) run inside your AI agent.
+
 ${BOLD}COMMANDS${RESET}
   install <skill>      Download and install a skill
   uninstall <skill>    Remove an installed skill

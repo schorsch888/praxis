@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **design-doc-elite-review skill** (`skills/design-doc-elite-review/`): introduces a top cross-functional panel review workflow for design documents with multi-round support/opposition analysis and enterprise-grade decision gates
+
+### Changed
+
+- **self-improve skill** (`skills/self-improve/SKILL.md`, now `1.1.0`): added explicit conflict-resolution priority (`Safety Guards > Process > Trust`), enforced fail-closed behavior for AI_CONSTITUTION sync failures unless explicitly approved for one-time degraded fan-out, split manual-command triggers from contextual suggestion triggers, hardened git baseline discovery for non-standard branches/detached states, and upgraded audit logs with hash-chain fields (`prev_hash`, `entry_hash`)
+- **CLI docs/help** (`README.md`, `cli/README.md`, `cli/praxis.sh`): clarified that the praxis CLI distributes/validates skills while workflow execution happens inside AI agents
+- **Validation CI** (`.github/workflows/validate-skills.yml`): added guard ensuring frontmatter manual commands stay in sync with documented `## Subcommands`
+
 ## [1.0.0] - 2026-03-01
 
 ### Added

@@ -4,11 +4,19 @@
 
 version: "1.0.0"
 skills:
+  design-doc-elite-review:
+    version: 0.1.0
+    path: skills/design-doc-elite-review/SKILL.md
+    description: "Runs multi-round, cross-functional design document reviews with explicit support and opposition analysis, then issues a decision using enterprise and big-tech production standards."
+    tags: [design-review, architecture, product, governance, enterprise]
+    author: praxis-maintainers
+    maturity: draft
+    sha256: 064e5143a7752b201c11a4dd8901356d68a3c529bf42fbdc1d272a2ee792e76d
   self-improve:
-    version: 1.0.0
+    version: 1.1.0
     path: skills/self-improve/SKILL.md
     description: "Teaches AI agents to learn from practice — extracting patterns, lessons, and coding standards from bugs fixed, reviews completed, and features shipped."
     tags: [learning, standards, memory, continuous-improvement]
     author: praxis-maintainers
     maturity: stable
-    sha256: 3ab1a0986e84d86990690c6b7e410890a45274b3c7be66fbc61959aecbaf1c85
+    sha256: 506280dd4327dfe3e2e95db42cd36136836a1538865c362c24eeb786318385f7

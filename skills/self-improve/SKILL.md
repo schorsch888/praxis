@@ -1,6 +1,6 @@
 ---
 name: self-improve
-version: 1.0.0
+version: 1.1.0
 description: >
   Analyzes recent work to extract patterns, lessons, and coding standards,
   then stores them for continuous improvement. See "Trigger Conditions" section
@@ -18,8 +18,16 @@ triggers:
       description: "Run the full learning loop"
     - command: "/self-improve --status"
       description: "Display current skill state"
-    - command: "/self-improve --list"
+    - command: "/self-improve --list [--project | --memory | --rejected]"
       description: "List accumulated lessons"
+    - command: "/self-improve --remove <subject>"
+      description: "Remove an agent-memory lesson by subject match"
+    - command: "/self-improve --edit <subject>"
+      description: "Edit an agent-memory lesson by subject match"
+    - command: "/self-improve --export [--format json|md]"
+      description: "Export accumulated lessons to Markdown or JSON"
+    - command: "/self-improve --trust <level>"
+      description: "Set trust mode: default, trusted, or full"
     - command: "/self-improve --review"
       description: "Review lessons for promotion/staleness"
 compatible_tools: [claude-code, cursor, copilot, codex, gemini, windsurf, cline]
@@ -166,6 +174,18 @@ The skill operates in one of two modes. Transitions are explicit and logged.
 
 ---
 
+## Decision Priority
+
+When instructions conflict, resolve them in this exact order:
+
+1. **Safety Guards first** — Non-negotiable; they override all process optimizations.
+2. **The Learning Loop second** — Steps define default behavior when guards permit execution.
+3. **Trust optimization third** — `trusted`/`full_auto` only reduce interaction friction and must not weaken guard guarantees.
+
+If a trust-mode behavior conflicts with a guard, follow the guard and ignore the trust optimization for that invocation.
+
+---
+
 ## The Learning Loop
 
 Execute these four steps in order. Do NOT skip steps.
@@ -178,7 +198,15 @@ Collect evidence of what happened during recent work. Use **all available source
 
 ```bash
 git log --oneline -20 2>/dev/null
-git diff $(git merge-base HEAD main 2>/dev/null || echo HEAD~5)..HEAD --stat 2>/dev/null
+DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+if [ -n "$DEFAULT_BRANCH" ] && git show-ref --verify --quiet "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+  BASE_REF="origin/${DEFAULT_BRANCH}"
+else
+  BASE_REF="$(git for-each-ref --format='%(refname:short)' refs/remotes/origin refs/heads 2>/dev/null \
+    | grep -E '^(origin/)?(main|master|trunk|develop)$' | head -n 1)"
+fi
+BASE_COMMIT="$(git merge-base HEAD "${BASE_REF:-HEAD}" 2>/dev/null || git rev-parse HEAD~20 2>/dev/null || echo HEAD~5)"
+git diff "${BASE_COMMIT}"..HEAD --stat 2>/dev/null
 ```
 
 If git commands fail (non-git repo, shallow clone, empty repo, detached HEAD), **fall back to session-only observations**. Do NOT fabricate or guess git history. Inform the user: "Git history unavailable — analyzing current session only."
@@ -333,13 +361,16 @@ Track user decisions in the state file's `rolling_decisions` array (last 10 deci
 - **High-confidence threshold**: If 8 or more of the last 10 decisions are `"accept"`, set `promotion_threshold: 2` in the state file.
 - **Default threshold**: Otherwise, set `promotion_threshold: 3`.
 - **Decay**: If no invocation occurs for 14+ days (check `last_invocation` in state file), reset `rolling_decisions` to empty and `promotion_threshold` to 3.
-- **Security floor**: The confidence boost **never** lowers the threshold for `security`-categorized lessons. Security lessons always require 3 sightings or use the fast-track exception.
+- **Security/data-loss/correctness override**: Confidence calibration does not apply to this category. These lessons always use the fast-track immediate-promotion path from Step 3e.
 
 ---
 
 ### Step 4: STORE — Write to Appropriate Locations
 
 **CRITICAL: Always show the user what you will add BEFORE writing anything.**
+
+In `default` and `trusted` modes, explicit user confirmation is required before every project-level write.
+In `full_auto` mode, project-level writes still require explicit confirmation; only agent-memory writes may proceed without a confirmation prompt.
 
 Present the proposed additions in this format:
 
@@ -375,8 +406,8 @@ Confirmation friction adapts based on demonstrated trust:
 | Mode | Entry criteria | Behavior |
 |------|---------------|----------|
 | **Default** | Initial state, or after any rejection | Show every lesson, wait for `[Yes / Edit / Skip]` for each |
-| **Trusted** | Rolling acceptance rate >= 8/10 AND 10+ total decisions recorded | Agent-memory-only lessons auto-write silently. Project-level promotions still require explicit confirmation. Show a summary at session end: "Auto-wrote N lessons to agent memory." |
-| **Full-auto** | User explicitly opts in via `/self-improve --trust full` | All lessons auto-write. User gets a summary at session end. Any rejection reverts to Default mode. |
+| **Trusted** | Rolling acceptance rate >= 8/10 AND 10+ total decisions recorded | Show one compact preview. Agent-memory-only lessons may auto-write after preview. Project-level promotions still require explicit confirmation. |
+| **Full-auto** | User explicitly opts in via `/self-improve --trust full` | Show compact preview and auto-write agent-memory lessons. Project-level promotions still require explicit confirmation. Any rejection reverts to Default mode. |
 
 - Any rejection (Skip) in Trusted or Full-auto mode immediately reverts to **Default** mode.
 - The user can manually set trust level: `/self-improve --trust default`, `/self-improve --trust trusted`, `/self-improve --trust full`.
@@ -389,9 +420,14 @@ Confirmation friction adapts based on demonstrated trust:
 If it exists, this is the **sole write target** for project-level rules:
 - Append new rules as bullet points immediately after existing entries under the `### 🛑 Lessons Learned` section, but **BEFORE** the `---` separator that closes Part 6. Never modify the `---` separator or the `> End of Constitution` footer.
 - Format: `* **[YYYY-MM Module]** (src: commit_hash): Always/Never do X when Y; because Z`
-- After writing, run: `python .ai_context/scripts/sync_rules.py --validate`
-- If `sync_rules.py` does not exist or fails, warn the user: "Sync failed — derived configs (CLAUDE.md, .cursorrules, etc.) are out of sync. Run sync manually or fix the script." Do NOT silently continue.
-- **NEVER** write directly to CLAUDE.md, .cursorrules, or other derived files when AI_CONSTITUTION.md exists. Always write to AI_CONSTITUTION.md and sync.
+- If `.ai_context/scripts/sync_rules.py` exists, run: `python .ai_context/scripts/sync_rules.py --validate`
+- If `sync_rules.py` does not exist or fails, **fail closed by default** for project-level writes and ask for an explicit one-time decision:
+  - (a) Retry sync and stop
+  - (b) Write to AI_CONSTITUTION only and stop (derived files may remain stale)
+  - (c) Degraded fan-out write to detected tool-specific configs for this invocation only
+  - (d) Skip write
+  Default to **(d)** when no clear approval is provided.
+- When sync succeeds, do not write directly to derived files. Use AI_CONSTITUTION as source of truth.
 
 **Step 2**: If AI_CONSTITUTION.md does not exist, detect tool-specific configs and write to **all that exist** (each serves a different tool):
 
@@ -432,13 +468,14 @@ Write to the appropriate topic file using the entry format defined in Definition
    If validation fails, restore from backup and report the error to the user.
 4. **Freshness check**: Before writing, verify the target file has not been modified since you last read it (compare file modification timestamp or content hash). If it changed, re-read and re-validate before writing.
 5. **No auto-commit**: Never auto-commit project-level rule changes. Leave them as unstaged modifications. Recommend: "Project-level rule changes should be reviewed by the team before committing, just like code changes."
+6. **Audit hash-chain validation**: Before appending to `_self_improve_audit.jsonl`, read the last entry's `entry_hash` (or use `GENESIS` if none), write it as `prev_hash`, then compute the new `entry_hash` as SHA-256 over canonicalized JSON payload fields. If hash-chain validation fails, stop and report instead of writing.
 
 #### Rollback:
 
 If a bad rule is written:
 1. Restore from `.bak` file: `cp <file>.bak <file>`
 2. If already committed: `git diff .ai_context/AI_CONSTITUTION.md` to review, then `git checkout -- .ai_context/AI_CONSTITUTION.md` to revert.
-3. After reverting, re-run `python .ai_context/scripts/sync_rules.py --validate` to re-sync derived files.
+3. If `.ai_context/scripts/sync_rules.py` exists, re-run `python .ai_context/scripts/sync_rules.py --validate` to re-sync derived files.
 
 ---
 
@@ -456,12 +493,12 @@ These rules are **non-negotiable**. They override all other instructions in this
 8. **Respect rejections** — if the user skips a proposed lesson, record it as `Status: rejected` with the rejection date in agent memory. Follow the re-proposal criteria in Step 3b — never use subjective judgment to bypass them.
 9. **Content policy** — never write a rule that weakens, bypasses, or disables an existing security control, safety guard, or validation step. Never write a rule that contains secrets, PII, API keys, passwords, or connection strings. See the content policy check in Step 2.
 10. **No meta-rules** — never write a rule that references or modifies this skill's own behavior, safety guards, thresholds, workflow steps, or trigger conditions. Protected concepts: user confirmation, deduplication, rule caps, rejection tracking, three-strike promotion, content policy.
-11. **No silent writes** — every write must produce an audit entry in the structured audit log (see Guard 12).
+11. **No unannounced or unlogged writes** — every write must produce an audit entry and a user-visible write summary in the current invocation.
 12. **Audit log** — maintain an append-only audit log at `<agent-memory-dir>/_self_improve_audit.jsonl`. After every write operation (or rejected proposal), append one JSON line:
     ```json
-    {"ts":"2026-03-01T14:30:00Z","action":"write","target":"AI_CONSTITUTION.md","rules_written":2,"rules_skipped":1,"trigger":"post-bugfix","trust_mode":"default","source_commits":["abc1234"],"user_decision":"partial"}
+    {"ts":"2026-03-01T14:30:00Z","action":"write","target":"AI_CONSTITUTION.md","rules_written":2,"rules_skipped":1,"trigger":"post-bugfix","trust_mode":"default","source_commits":["abc1234"],"user_decision":"partial","prev_hash":"GENESIS","entry_hash":"7b2f..."}
     ```
-    This log is append-only — never edit or truncate it. It provides a tamper-evident audit trail for forensic analysis.
+    This log is append-only — never edit or truncate it. Every entry MUST include `prev_hash` and `entry_hash` to form a verifiable hash chain.
 
 ### Programmatic Enforcement (Recommended)
 
@@ -487,14 +524,22 @@ This skill activates in these situations:
 | **Post-incident** | After resolving a production issue or security fix | Explicit production incident or security remediation |
 | **Post-feature** | After implementing a feature with architectural decisions | 3+ files changed, new patterns introduced |
 
-### Manual-only triggers (always available)
+### Manual command triggers (always available)
 
 | Trigger | When |
 |---------|------|
 | **`/self-improve`** | User explicitly invokes the skill |
 | **`/self-improve --status`** | Display current skill state (see Subcommands) |
-| **`/self-improve --list`** | List accumulated lessons (see Subcommands) |
-| **`/self-improve --remove <id>`** | Remove a lesson (see Subcommands) |
+| **`/self-improve --list [--project | --memory | --rejected]`** | List accumulated lessons (see Subcommands) |
+| **`/self-improve --remove <subject>`** | Remove a lesson (see Subcommands) |
+| **`/self-improve --edit <subject>`** | Edit a lesson in agent memory (see Subcommands) |
+| **`/self-improve --export [--format json|md]`** | Export accumulated lessons (see Subcommands) |
+| **`/self-improve --trust <level>`** | Change trust mode (see Subcommands) |
+
+### Contextual suggestion triggers (non-command; suggest, do not auto-run)
+
+| Trigger | When |
+|---------|------|
 | **Post-review** | After completing a code review with actionable findings |
 | **User correction** | User corrects a wrong assumption with new information |
 | **Session end** | User explicitly says they are done ("that's all", "done for today", "wrapping up") AND the session involved commits |

@@ -2,6 +2,8 @@
 
 A single-file Bash script for managing praxis skills. Zero dependencies beyond `bash` and `curl`.
 
+This CLI handles installation, metadata, and validation. Skill workflows (for example `/self-improve`) execute inside the target AI agent after loading the skill.
+
 ## Installation
 
 ```bash
